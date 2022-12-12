@@ -3,14 +3,13 @@ const ulid = require("ulid");
 const { configPath } = require("../../../model/config");
 const profilesJSON = path.resolve(configPath + "/profiles.json");
 exports.profilesJSON = profilesJSON;
-const { readResource, writeResource, resourceFetched, resourceUpdated, responseSchema, resourceCreated } = require("./utils");
+const { sortObjectByKey, readResource, writeResource, resourceFetched, resourceUpdated, responseSchema, resourceCreated } = require("./utils");
 const userManager = require("../../../bin/user.");
 
 module.exports = function () {
     let operations = {
         GET,
         POST,
-        PUT,
     };
 
     function parseAccessControl(accessControlJson) {
@@ -36,17 +35,18 @@ module.exports = function () {
                     return [profileId, profile];
                 })
             );
+            const sortedProfiles = sortObjectByKey(profiles);
             const currentUser = await userManager.getUser(req.user);
             const groups = currentUser.user.groups;
             if (groups.includes("admin")) {
-                resourceFetched(res, profiles);
+                resourceFetched(res, sortedProfiles);
             } else {
-                const userProfiles = Object.fromEntries(
-                    Object.entries(profiles).filter(([profileId, _profile]) => {
+                const sortedUserProfiles = Object.fromEntries(
+                    Object.entries(sortedProfiles).filter(([profileId, _profile]) => {
                         return groups.includes(profileId);
                     })
                 );
-                resourceFetched(res, userProfiles);
+                resourceFetched(res, sortedUserProfiles);
             }
         } catch (error) {
             next(error);
@@ -57,35 +57,6 @@ module.exports = function () {
         security: [{ loginScheme: [] }],
         operationId: "getProfiles",
         responses: responseSchema("Profiles", "GET"),
-    };
-
-    ///// PUT api/v1/profiles
-    async function PUT(req, res, next) {
-        try {
-            const updatedProfile = req.body;
-            const objectToUpdateKey = Object.keys(req.body)[0];
-            const oldProfiles = await readResource(profilesJSON, res); //.catch(e => res.status((500).json({ message: 'I couldn\'t read the resource' })));
-            const oldProfilesNames = Object.entries(oldProfiles).map(([_id, profile]) => {
-                return profile.name;
-            });
-
-            const updatedProfiles = { ...oldProfiles, ...updatedProfile };
-            if (oldProfilesNames.indexOf(objectToUpdateKey) === 0) {
-                const savedProfiles = await writeResource(profilesJSON, updatedProfiles, res); //.catch(e => res.status((500).json({ message: "I couldn't write the resource" })));
-                resourceUpdated(res, savedProfiles);
-            } else {
-                res.status(400).json({ message: "Resource does not exist. If you want to create another resource, use POST instead." });
-            }
-        } catch (err) {
-            next(err);
-        }
-    }
-    PUT.apiDoc = {
-        summary: "Update profiles one by one",
-        security: [{ restrictAdmin: [] }],
-        operationId: "updateProfiles",
-        parameters: [],
-        responses: responseSchema("Profiles", "PUT"),
     };
 
     ///// POST api/v1/profiles

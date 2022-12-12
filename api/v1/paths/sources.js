@@ -7,7 +7,7 @@ const util = require("util");
 const { readResource, writeResource, resourceCreated, responseSchema, resourceFetched } = require("./utils");
 const userManager = require(path.resolve("bin/user."));
 const read = util.promisify(fs.readFile);
-const { getAllowedSources, filterSources } = require("./utils.js");
+const { getAllowedSources, filterSources, sortObjectByKey } = require("./utils.js");
 module.exports = function () {
     let operations = {
         GET,
@@ -17,19 +17,28 @@ module.exports = function () {
     ///// GET api/v1/sources
     async function GET(req, res, next) {
         try {
+
+
             const userInfo = await userManager.getUser(req.user);
-            const sources = await read(sourcesJSON);
+            var sourcesFileName=sourcesJSON
+            if(req.params.sourcesFileName=="ontocommonsSources.json")
+                sourcesFileName=sourcesFileName.replace("sources.json",sourcesFileName);
+          //  const sources = await read(sourcesJSON);
+            const sources = await read(sourcesFileName);;
             const parsedSources = JSON.parse(sources);
-            if (userInfo.user.groups.includes("admin")) {
-                // return all sources if user is admin
-                resourceFetched(res, parsedSources);
-            } else {
+            // return all sources if user is admin
+            let filteredSources = parsedSources;
+            if (!userInfo.user.groups.includes("admin")) {
+                // return filtered sources if user is not admin
                 const profiles = await read(profilesJSON);
                 const parsedProfiles = JSON.parse(profiles);
                 const allowedSources = getAllowedSources(userInfo.user, parsedProfiles, parsedSources, config.formalOntologySourceLabel);
                 const filteredSources = filterSources(allowedSources, parsedSources);
-                resourceFetched(res, filteredSources);
             }
+            // sort
+            const sortedSources = sortObjectByKey(filteredSources);
+            // return
+            resourceFetched(res, sortedSources);
         } catch (err) {
             next(err);
         }
@@ -39,6 +48,15 @@ module.exports = function () {
         security: [{ loginScheme: [] }],
         operationId: "getSources",
         responses: responseSchema("Sources", "GET"),
+      /*  parameters: [
+            {
+                name: "sourcesFileName",
+                description: "name",
+                in: "path",
+                type: "string",
+                required: false,
+            },
+        ]*/
     };
 
     ///// POST api/v1/sources

@@ -406,12 +406,14 @@ var Sparql_generic = (function () {
                 var insertTriplesStr = "";
                 triples.forEach(function (item, _index) {
                     var tripleStr = self.triplesObjectToString(item);
+                    if (options.sparqlPrefixes) tripleStr = Sparql_common.replaceSparqlPrefixByUri(tripleStr, options.sparqlPrefixes);
                     if (!uniqueTriples[tripleStr]) {
                         // suppress duplicate if any
                         uniqueTriples[tripleStr] = 1;
                         insertTriplesStr += tripleStr;
                     }
                 });
+
                 var query = self.getDefaultSparqlPrefixesStr();
                 query += " WITH GRAPH  <" + graphUri + ">  " + "INSERT DATA" + "  {" + insertTriplesStr + "  }";
 
@@ -431,7 +433,7 @@ var Sparql_generic = (function () {
     self.update = function (_sourceLabel, _triples, _callback) {
         /*
 
-    PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 with <http://data.total.com/resource/tsf/maintenance/romain_14224/>
 DELETE {
 ?id rdfs:label ?oldLabel .
@@ -448,19 +450,22 @@ bind (replace(?oldLabel,"Class","Class-") as ?newLabel)
 
 
 
-     */
+*/
 
         return;
     };
 
-    self.deleteGraph = function (sourceLabel, callback) {
+    self.deleteTriplesWithFilter = function (sourceLabel, filter, callback) {
         var graphUri = Config.sources[sourceLabel].graphUri;
 
-        var query = " WITH <" + graphUri + "> DELETE {?s ?p ?o}";
+        var query = " WITH <" + graphUri + "> DELETE {?s ?x ?y} ";
 
+        if (filter) query += " WHERE {?s ?x ?y.?s ?p ?o. filter(" + filter + ")}";
+
+        if (!filter) if (!confirm("Do you really want to delete all triples of source " + sourceLabel)) return;
         var url = Config.sources[sourceLabel].sparql_server.url + "?format=json&query=";
         Sparql_proxy.querySPARQL_GET_proxy(url, query, null, { source: sourceLabel }, function (err, _result) {
-            return callback(err);
+            return callback(err, _result);
         });
     };
 
@@ -627,6 +632,21 @@ bind (replace(?oldLabel,"Class","Class-") as ?newLabel)
             if (aValue > bValue) return 1;
             if (aValue < bValue) return -1;
             return 0;
+        });
+        return bindings;
+    };
+
+    self.setMissingLabels = function (bindings, _fields, options) {
+        if (!options) options = {};
+        if (!Array.isArray(_fields)) _fields = [_fields];
+        _fields.forEach(function (_field) {
+            bindings.forEach(function (item) {
+                if (item[_field] && !item[_field + "Label"]) {
+                    item[_field + "Label"] = { value: Sparql_common.getLabelFromURI(item[_field].value) };
+                }
+
+                //   item.child1Label={value:id.substring(id.lastIndexOf("#")+1)}
+            });
         });
         return bindings;
     };
@@ -798,18 +818,25 @@ bind (replace(?oldLabel,"Class","Class-") as ?newLabel)
         );
     };
 
+    self.getLangFilterStr = function (options, variable) {
+        var langFilter = "";
+        if (!options || !options.lang) return "";
+        return " FILTER (lang(" + variable + ")='" + options.lang + "' || !lang(" + variable + "))  ";
+    };
+
     self.getSourceTaxonomy = function (sourceLabel, options, callback) {
+        var schemaType = Config.sources[sourceLabel].schemaType;
         if (!options) options = {};
         var parentType;
         var conceptType;
-        if (Config.sources[sourceLabel].schemaType == "OWL") {
+        if (schemaType == "OWL") {
             parentType = Sparql_OWL.getSourceTaxonomyPredicates(sourceLabel);
 
             conceptType = "owl:Class|owl:NamedIndividual";
-        } else if (Config.sources[sourceLabel].schemaType == "KNOWLEDGE_GRAPH") {
+        } else if (schemaType == "KNOWLEDGE_GRAPH") {
             parentType = "rdf:type";
             conceptType = "owl:NamedIndividual";
-        } else if (Config.sources[sourceLabel].schemaType == "SKOS") {
+        } else if (schemaType == "SKOS") {
             parentType = "skos:broader";
             conceptType = "skos:Concept";
         } else if (options.parentType) {
@@ -847,20 +874,20 @@ bind (replace(?oldLabel,"Class","Class-") as ?newLabel)
                         "PREFIX skos: <http://www.w3.org/2004/02/skos/core#>" +
                         "SELECT distinct * " +
                         fromStr +
-                        " WHERE {" +
-                        "  ?concept " +
-                        parentType +
-                        " ?firstParent.OPTIONAL{?concept rdfs:label ?conceptLabel}." +
-                        "OPTIONAL{?concept skos:prefLabel ?skosLabel}. " +
-                        "OPTIONAL{?concept skos:altLabel ?skosAltLabel}. " +
-                        "OPTIONAL{?concept <http://souslesens.org/resource/vocabulary/hasCode> ?code}. ";
+                        " WHERE {";
+                    var where = "  ?concept " + parentType + " ?firstParent." + Sparql_common.getVariableLangLabel("concept", false, true) + "OPTIONAL{?concept skos:altLabel ?skosAltLabel }";
+                    if (options.filter) where += " " + options.filter + " ";
 
-                    if (options.filter) query += " " + options.filter + " ";
+                    where += "filter (?firstParent not in (owl:Restriction, owl:Class))";
+                    where += " FILTER NOT EXISTS {?firstParent rdf:type owl:Restriction}";
 
-                    query += "filter (?firstParent not in (owl:Restriction, owl:Class))";
-
-                    query += " FILTER NOT EXISTS {?firstParent rdf:type owl:Restriction}";
-
+                    // make two queries and union them to solve timeout problem
+                    if (schemaType == "OWL") {
+                        var where1 = where.replace("|<http://www.w3.org/2004/02/skos/core#prefLabel>", "");
+                        var where2 = where.replace("?concept rdfs:label|", "?concept ");
+                        where = "{" + where1 + "}\n UNION \n{" + where2 + "}";
+                    }
+                    query += where;
                     query += "}";
 
                     async.whilst(
@@ -872,17 +899,29 @@ bind (replace(?oldLabel,"Class","Class-") as ?newLabel)
                             query2 += " limit " + (limitSize + 1) + " offset " + offset;
 
                             self.sparql_url = Config.sources[sourceLabel].sparql_server.url;
-                            var url = self.sparql_url + "?format=json&timeout=20000&debug=on&query=";
-                            Sparql_proxy.querySPARQL_GET_proxy(url, query2, "", { source: sourceLabel }, function (err, result) {
-                                if (err) return callbackWhilst(err);
-                                result = result.results.bindings;
-                                allData = allData.concat(result);
-                                resultSize = result.length;
-                                totalCount += result.length;
-                                MainController.UI.message(sourceLabel + "retreived triples :" + totalCount);
-                                offset += limitSize;
-                                callbackWhilst();
-                            });
+                            var url = self.sparql_url + "?format=json&timeout=20000&debug=off&query=";
+                            Sparql_proxy.querySPARQL_GET_proxy(
+                                url,
+                                query2,
+                                "",
+                                {
+                                    source: sourceLabel,
+                                    skipCurrentQuery: true,
+                                },
+                                function (err, result) {
+                                    if (err) {
+                                        console.log(query2);
+                                        return callbackWhilst(err);
+                                    }
+                                    result = result.results.bindings;
+                                    allData = allData.concat(result);
+                                    resultSize = result.length;
+                                    totalCount += result.length;
+                                    MainController.UI.message(sourceLabel + "retreived triples :" + totalCount);
+                                    offset += limitSize;
+                                    callbackWhilst();
+                                }
+                            );
                         },
                         function (_err) {
                             callbackSeries();
@@ -905,6 +944,7 @@ bind (replace(?oldLabel,"Class","Class-") as ?newLabel)
 
                     allData.forEach(function (item) {
                         if (!skosLabelsMap[item.concept.value]) skosLabelsMap[item.concept.value] = [];
+                        if (item.concept.value == "http://www.eionet.europa.eu/gemet/concept/4254") var x = 3;
                         var conceptLabel = getConceptLabel(item);
 
                         if (!conceptLabel) return;
@@ -1038,8 +1078,6 @@ bind (replace(?oldLabel,"Class","Class-") as ?newLabel)
             );
         });
     };
-
-    self.exportOntology = function () {};
 
     return self;
 })();

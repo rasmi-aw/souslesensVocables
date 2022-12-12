@@ -93,17 +93,19 @@ var Sparql_proxy = (function () {
     self.querySPARQL_GET_proxy = function (url, query, queryOptions, options, callback) {
         if (url.indexOf("_default") == 0) url = Config.default_sparql_url;
         var sourceParams;
+        var headers = {};
         if (options.source) sourceParams = Config.sources[options.source];
         else sourceParams = Config.sources[MainController.currentSource];
 
         /*    if(!sourceParams.graphUri){// cas des sources sans graphe
-        query=query.replace(/GRAPH ?[a-zA-Z0-9]+\{/,"{")
-    }*/
+    query=query.replace(/GRAPH ?[a-zA-Z0-9]+\{/,"{")
+}*/
 
-        self.currentQuery = query;
         if (!options) options = {};
 
         $("#waitImg").css("display", "block");
+
+        if (!options.skipCurrentQuery) self.currentQuery = query;
 
         var payload = {
             options: {},
@@ -124,13 +126,14 @@ var Sparql_proxy = (function () {
         } else {
             //POST
             payload.POST = true;
-            var headers = {};
+
             if (sourceParams.sparql_server.headers) {
                 body = JSON.stringify({ headers: sourceParams.sparql_server.headers });
             }
             if (sourceParams.sparql_server.type == "fuseki") url = url.replace("&query=", "");
 
-            headers["Accept"] = "application/sparql-results+json";
+            if (options.acceptHeader) headers["Accept"] = options.acceptHeader;
+            else headers["Accept"] = "application/sparql-results+json";
             headers["Content-Type"] = "application/x-www-form-urlencoded";
             var body = {
                 params: { query: query, useProxy: useProxy },
@@ -140,12 +143,14 @@ var Sparql_proxy = (function () {
             payload.body = JSON.stringify(body);
             payload.url = url + queryOptions;
         }
+
         $.ajax({
             type: "POST",
             url: `${Config.apiUrl}/httpProxy`,
             data: payload,
             dataType: "json",
             success: function (data, _textStatus, _jqXHR) {
+                if (headers["Accept"] && headers["Accept"].indexOf("json") < 0) return callback(null, data);
                 if (data.result && typeof data.result != "object") data = JSON.parse(data.result.trim());
 
                 if (!data.results) return callback(null, { results: { bindings: [] } });

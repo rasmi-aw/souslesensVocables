@@ -101,6 +101,8 @@ var httpProxy = {
             console.log(" POST-----------USING  proxy---------" + proxy);
         }
 
+        options.rejectUnauthorized = false;
+
         request(options, function (error, response, body) {
             if (error) {
                 console.log(error);
@@ -108,6 +110,7 @@ var httpProxy = {
                 return callback(error);
             }
 
+            if (headers && headers["Accept"].indexOf("json") < 0) return callback(null, body);
             if (typeof body === "string") {
                 body = body.trim();
                 var p = body.toLowerCase().indexOf("bindings");
@@ -124,9 +127,12 @@ var httpProxy = {
                 } catch (e) {
                     console.log(body);
                     console.log(e);
-                    err = e;
+                    err = e.message;
+                    if (e.message.indexOf("Unexpected token V in JSON ") > -1) {
+                        err = e.message;
+                    }
                 } finally {
-                    callback(err, body);
+                    return callback(err, body);
                 }
             } else {
                 return callback(null, body);
