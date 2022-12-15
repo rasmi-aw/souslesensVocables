@@ -1,8 +1,25 @@
 doctype html
 html
-  head
-    title= title
-    link(rel='stylesheet', href='/stylesheets/style.css')
-    link(rel='stylesheet', href='https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-alpha.2/css/bootstrap.min.css')
-  body
-    block content
+    head
+        title= title
+        link(rel='stylesheet', href='/stylesheets/style.css')
+        link(rel='stylesheet', href='https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-alpha.2/css/bootstrap.min.css')
+    body
+        header
+            nav.navbar.navbar-expand-lg.p-5(style="background-color:#fbfbfb;")
+                a.nav-link.navbar-brand.text-muted(href="http://souslesens.enit.fr") Souslesens
+                ul.navbar-nav.list-unstyled.col-lg-9
+                    li.nav-item
+                        a.nav-link.text-muted(href="http://industryportal.enit.fr") Industryportal
+                    li.nav-item
+                        a.nav-link.text-muted(href="") Blog
+                    li.nav-item
+                        a.nav-link.text-muted(href="") About us
+                ul.navbar-nav.list-unstyled.col-lg-2
+                    li.nav-item
+                        a.btn.btn-success(href="http://industryportal.enit.fr/accounts/new") SignUp
+                    li.nav-item
+                        a.btn.btn-secondary(href='mailto:mkarray@enit.fr') Contact us
+        br
+        br
+        block content
